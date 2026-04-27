@@ -8,6 +8,7 @@ create table if not exists public.users (
   name text,
   role text default 'user',
   is_active boolean default true,
+  is_welcomed boolean not null default false,
   created_at timestamptz default now()
 );
 

@@ -12,6 +12,7 @@ const {
   listUserExpenses,
   listNewExpenses,
   getUser,
+  setUserWelcomed,
   getInviteByCode,
   upsertUserFromInvite,
   markInviteCodeUsed,
@@ -27,6 +28,8 @@ const MSG_WELCOME_START = '📎 Отправьте счёт';
 const MSG_CODE_NOT_VALID = '❌ Код недействителен';
 const MSG_CODE_ALREADY_USED = '❌ Код уже использован';
 const MSG_CODE_GRANTED = '✅ Доступ открыт. Отправьте счёт';
+const MSG_WELCOME_FIRST =
+  'Отправьте счёт — файлом или перешлите из чата 👇';
 
 if (!TOKEN) {
   console.error('Укажите TELEGRAM_BOT_TOKEN в .env');
@@ -80,6 +83,21 @@ async function sendStaleAndReset(chatId) {
 
 function clearSessionForChat(chatId) {
   userSessions.delete(chatId);
+}
+
+function needsAutoWelcome(u) {
+  return Boolean(u && u.is_welcomed !== true);
+}
+
+async function markWelcomedAfterFileIfNeeded(chatId, u) {
+  if (!needsAutoWelcome(u)) {
+    return;
+  }
+  try {
+    await setUserWelcomed(chatId);
+  } catch (e) {
+    console.error('setUserWelcomed (первый файл/фото):', e);
+  }
 }
 
 function formatUserLabel(from) {
@@ -442,6 +460,11 @@ bot.onText(/^\/start(?:@\w+)?\s+(\S+)$/, async (msg, match) => {
         chatId,
         'У вас уже есть доступ. Команда /start — сброс сессии. Отправьте счёт.'
       );
+      try {
+        await setUserWelcomed(chatId);
+      } catch (e) {
+        console.error('setUserWelcomed (уже с доступом):', e);
+      }
       return;
     }
     const invite = await getInviteByCode(code);
@@ -462,6 +485,11 @@ bot.onText(/^\/start(?:@\w+)?\s+(\S+)$/, async (msg, match) => {
     });
     await markInviteCodeUsed(code, chatId);
     await bot.sendMessage(chatId, MSG_CODE_GRANTED);
+    try {
+      await setUserWelcomed(chatId);
+    } catch (e) {
+      console.error('setUserWelcomed (код):', e);
+    }
   } catch (e) {
     console.error('Ошибка /start (код):', e);
     try {
@@ -486,6 +514,11 @@ bot.onText(/^\/start(?:@\w+)?\s*$/, async (msg) => {
       return;
     }
     await bot.sendMessage(chatId, MSG_WELCOME_START);
+    try {
+      await setUserWelcomed(chatId);
+    } catch (e) {
+      console.error('setUserWelcomed (/start):', e);
+    }
   } catch (e) {
     console.error('Ошибка /start:', e);
   }
@@ -595,8 +628,9 @@ bot.on('document', async (msg) => {
   if (!msg.document) {
     return;
   }
+  let u;
   try {
-    const u = await getUser(chatId);
+    u = await getUser(chatId);
     if (!u) {
       await bot.sendMessage(chatId, MSG_NO_ACCESS);
       return;
@@ -606,6 +640,7 @@ bot.on('document', async (msg) => {
     return;
   }
   try {
+    await markWelcomedAfterFileIfNeeded(chatId, u);
     const doc = msg.document;
     const originalFileName = doc.file_name || `file-${Date.now()}.bin`;
     userSessions.set(chatId, {
@@ -644,8 +679,9 @@ bot.on('photo', async (msg) => {
   if (!msg.photo || msg.photo.length === 0) {
     return;
   }
+  let u;
   try {
-    const u = await getUser(chatId);
+    u = await getUser(chatId);
     if (!u) {
       await bot.sendMessage(chatId, MSG_NO_ACCESS);
       return;
@@ -655,6 +691,7 @@ bot.on('photo', async (msg) => {
     return;
   }
   try {
+    await markWelcomedAfterFileIfNeeded(chatId, u);
     const best = msg.photo[msg.photo.length - 1];
     const originalFileName = 'photo.jpg';
     userSessions.set(chatId, {
@@ -750,13 +787,31 @@ bot.on('message', async (msg) => {
       return;
     }
     if (!s) {
-      await bot.sendMessage(chatId, MSG_SEND_FILE_OR_PHOTO);
+      if (needsAutoWelcome(u)) {
+        try {
+          await bot.sendMessage(chatId, MSG_WELCOME_FIRST);
+          await setUserWelcomed(chatId);
+        } catch (e) {
+          console.error('привет (текст):', e);
+        }
+      } else {
+        await bot.sendMessage(chatId, MSG_SEND_FILE_OR_PHOTO);
+      }
     }
     return;
   }
 
   if (s && s.step === 'await_comment') {
     return;
+  }
+
+  if (needsAutoWelcome(u) && !s && !msg.document && !msg.photo) {
+    try {
+      await bot.sendMessage(chatId, MSG_WELCOME_FIRST);
+      await setUserWelcomed(chatId);
+    } catch (e) {
+      console.error('привет (стикер/пр.):', e);
+    }
   }
 });
 

@@ -171,6 +171,22 @@ async function getUser(chatId) {
 }
 
 /**
+ * Одноразовое авто-приветствие при первом открытии чата
+ * @param {number|string} chatId
+ */
+async function setUserWelcomed(chatId) {
+  const c = getClient();
+  const { error } = await c
+    .from('users')
+    .update({ is_welcomed: true })
+    .eq('chat_id', chatId);
+
+  if (error) {
+    throw error;
+  }
+}
+
+/**
  * Запись по коду (любое состояние is_active), для разделения «нет кода» / «уже использован»
  * @param {string} code
  * @returns {Promise<object | null>}
@@ -295,6 +311,7 @@ module.exports = {
   getExpenseByIdForAccountant,
   listUserExpenses,
   getUser,
+  setUserWelcomed,
   getInviteByCode,
   upsertUserFromInvite,
   markInviteCodeUsed,

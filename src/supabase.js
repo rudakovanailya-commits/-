@@ -187,7 +187,17 @@ async function setUserWelcomed(chatId) {
 }
 
 /**
- * Приведение к виду как в БД: без падения по регистру/пробелам/«мусору» из копирования
+ * Экранирование для ILIKE без срабатывания _ и % как маски
+ */
+function escapeIlikePattern(s) {
+  return String(s)
+    .replace(/\\/g, '\\\\')
+    .replace(/%/g, '\\%')
+    .replace(/_/g, '\\_');
+}
+
+/**
+ * Приведение к виду как в БД: без падения по регистру / пробелам / «мусору»
  * Telegram start payload допускает A–Z a–z 0–9 _
  * @param {string} raw
  */
@@ -195,6 +205,7 @@ function normalizeInviteCode(raw) {
   let s = String(raw ?? '')
     .normalize('NFKC')
     .trim()
+    .replace(/\s+/g, '')
     .replace(/\ufeff/g, '')
     .replace(/[\u200b-\u200d]/g, '');
   s = s.replace(/^[„"'«`'(\[\s]+|[\)"»'`\]\s]+$/g, '').trim();
@@ -212,23 +223,26 @@ async function getInviteByCode(code) {
   if (!normalized) {
     return null;
   }
-  const { data: byNorm, error: errNorm } = await c
+
+  const escaped = escapeIlikePattern(normalized);
+
+  const { data: exact, error: errEq } = await c
     .from('invite_codes')
     .select('*')
     .eq('code', normalized)
     .maybeSingle();
 
-  if (errNorm) {
-    throw errNorm;
+  if (errEq) {
+    throw errEq;
   }
-  if (byNorm) {
-    return byNorm;
+  if (exact) {
+    return exact;
   }
 
   const { data: byIlike, error: errIl } = await c
     .from('invite_codes')
     .select('*')
-    .ilike('code', normalized)
+    .ilike('code', escaped)
     .maybeSingle();
 
   if (errIl) {

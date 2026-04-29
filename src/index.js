@@ -483,7 +483,7 @@ bot.onText(/^\/start(?:@\w+)?\s+(\S+)$/, async (msg, match) => {
       role: invite.role || 'user',
       is_active: true
     });
-    await markInviteCodeUsed(code, chatId);
+    await markInviteCodeUsed(invite.code, chatId);
     await bot.sendMessage(chatId, MSG_CODE_GRANTED);
     try {
       await setUserWelcomed(chatId);
@@ -972,7 +972,7 @@ bot.on('callback_query', async (query) => {
         await bot.answerCallbackQuery(query.id, { text: 'Готово' });
       } catch (_) {}
       const text = TELEGRAM_BOT_USERNAME
-        ? `🔑 Код приглашения:\n\n${code}\n\n🔗 Ссылка:\nhttps://t.me/${TELEGRAM_BOT_USERNAME}?start=${code}\n\nОтправьте пользователю`
+        ? `🔑 Код приглашения:\n\n${code}\n\n🔗 Ссылка:\nhttps://t.me/${TELEGRAM_BOT_USERNAME}?start=${encodeURIComponent(code)}\n\nОтправьте пользователю`
         : `🔑 Код приглашения:\n\n${code}\n\nОткройте бота и введите:\n/start ${code}\n\nОтправьте пользователю`;
       await bot.sendMessage(query.from.id, text);
       return;

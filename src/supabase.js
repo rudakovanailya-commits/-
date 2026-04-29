@@ -187,26 +187,77 @@ async function setUserWelcomed(chatId) {
 }
 
 /**
+ * Приведение к виду как в БД: без падения по регистру/пробелам/«мусору» из копирования
+ * Telegram start payload допускает A–Z a–z 0–9 _
+ * @param {string} raw
+ */
+function normalizeInviteCode(raw) {
+  let s = String(raw ?? '')
+    .normalize('NFKC')
+    .trim()
+    .replace(/\ufeff/g, '')
+    .replace(/[\u200b-\u200d]/g, '');
+  s = s.replace(/^[„"'«`'(\[\s]+|[\)"»'`\]\s]+$/g, '').trim();
+  return s.toUpperCase().replace(/[^A-Z0-9_]/g, '');
+}
+
+/**
  * Запись по коду (любое состояние is_active), для разделения «нет кода» / «уже использован»
  * @param {string} code
  * @returns {Promise<object | null>}
  */
 async function getInviteByCode(code) {
   const c = getClient();
-  const trimmed = String(code || '').trim();
-  if (!trimmed) {
+  const normalized = normalizeInviteCode(code);
+  if (!normalized) {
     return null;
   }
-  const { data, error } = await c
+  const { data: byNorm, error: errNorm } = await c
     .from('invite_codes')
     .select('*')
-    .eq('code', trimmed)
+    .eq('code', normalized)
     .maybeSingle();
+
+  if (errNorm) {
+    throw errNorm;
+  }
+  if (byNorm) {
+    return byNorm;
+  }
+
+  const { data: byIlike, error: errIl } = await c
+    .from('invite_codes')
+    .select('*')
+    .ilike('code', normalized)
+    .maybeSingle();
+
+  if (errIl) {
+    throw errIl;
+  }
+  return byIlike ?? null;
+}
+
+/**
+ * @param {string} inviteCode ключ из строки invite (как в БД после select)
+ */
+async function markInviteCodeUsed(inviteCode, usedByChatId) {
+  const c = getClient();
+  const key =
+    inviteCode !== undefined && inviteCode !== null ? String(inviteCode).trim() : '';
+  if (!key) {
+    throw new Error('markInviteCodeUsed: empty invite_code');
+  }
+  const { error } = await c
+    .from('invite_codes')
+    .update({
+      is_active: false,
+      used_by: usedByChatId
+    })
+    .eq('code', key);
 
   if (error) {
     throw error;
   }
-  return data ?? null;
 }
 
 /**
@@ -230,32 +281,16 @@ async function upsertUserFromInvite(row) {
 }
 
 /**
- * Одноразовый код: пометить использованным и сохранить кто вошёл
- * @param {string} code
- * @param {number|string} usedByChatId
- */
-async function markInviteCodeUsed(code, usedByChatId) {
-  const c = getClient();
-  const { error } = await c
-    .from('invite_codes')
-    .update({
-      is_active: false,
-      used_by: usedByChatId
-    })
-    .eq('code', String(code).trim());
-
-  if (error) {
-    throw error;
-  }
-}
-
-/**
  * @param {{ code: string, role: string, created_by: number, is_active?: boolean }} row
  */
 async function createInviteCodeRow(row) {
   const c = getClient();
+  const normalized = normalizeInviteCode(row.code);
+  if (!normalized) {
+    throw new Error('createInviteCodeRow: empty code after normalize');
+  }
   const { error } = await c.from('invite_codes').insert({
-    code: row.code,
+    code: normalized,
     role: row.role,
     created_by: row.created_by,
     is_active: row.is_active !== false

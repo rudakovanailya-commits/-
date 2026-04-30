@@ -275,21 +275,28 @@ async function markInviteCodeUsed(inviteCode, usedByChatId) {
 }
 
 /**
- * @param {{ chat_id: number, name: string, role: string, is_active?: boolean }} row
+ * Регистрация по инвайту: вставка или обновление по chat_id
+ * created_at задаёт сервер по default; имя необязательно
+ * @param {{ chat_id: number|string, name?: string|null, role?: string|null, is_active?: boolean }} row
  */
 async function upsertUserFromInvite(row) {
   const c = getClient();
-  const { error } = await c.from('users').upsert(
-    {
-      chat_id: row.chat_id,
-      name: row.name,
-      role: row.role,
-      is_active: row.is_active !== false
-    },
-    { onConflict: 'chat_id' }
-  );
+  /** @type {{ chat_id: number|string; role: string; is_active: boolean; name?: string }} */
+  const payload = {
+    chat_id: row.chat_id,
+    role: row.role != null && String(row.role).trim() !== '' ? String(row.role).trim() : 'user',
+    is_active: row.is_active !== false
+  };
+  if (row.name != null && String(row.name).trim() !== '') {
+    payload.name = String(row.name).trim();
+  }
+
+  const { error } = await c.from('users').upsert(payload, {
+    onConflict: 'chat_id'
+  });
 
   if (error) {
+    console.error('Ошибка создания пользователя:', error);
     throw error;
   }
 }
